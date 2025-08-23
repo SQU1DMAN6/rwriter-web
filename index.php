@@ -1,0 +1,175 @@
+<?php
+session_start();
+include "/guard.php";
+include "/connect.php";
+
+$username = $_SESSION["name"];
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RWRiter Chat</title>
+<style>
+body { font-family: Arial, sans-serif; margin:0; display:flex; height:100vh; }
+.sidebar { width:250px; background:#222; color:#fff; display:flex; flex-direction:column; }
+.sidebar h2 { margin:0; padding:1rem; text-align:center; background:#111; }
+.chat-list { flex:1; overflow-y:auto; padding:0.5rem; }
+.chat-list button { display:block; width:100%; padding:0.75rem; border:none; background:#333; color:#fff; margin-bottom:0.5rem; text-align:left; cursor:pointer; border-radius:6px; }
+.chat-list button.active { background:#555; }
+.new-chat { padding:1rem; border-top:1px solid #444; }
+.main { flex:1; display:flex; flex-direction:column; }
+.messages { flex:1; padding:1rem; overflow-y:auto; background:#f3f3f3; }
+.message { margin-bottom:1rem; max-width:70%; padding:0.75rem 1rem; border-radius:8px; white-space:pre-wrap; }
+.user { background:#e0e0e0; align-self:flex-end; }
+.bot { background:#fff; border:1px solid #ccc; align-self:flex-start; }
+.input-box { display:flex; padding:1rem; background:#fff; border-top:1px solid #ccc; }
+.input-box textarea { flex:1; padding:0.75rem; border-radius:6px; border:1px solid #ccc; resize:none; height:50px; }
+.input-box button { margin-left:0.5rem; padding:0 1.25rem; border:none; background:#333; color:#fff; border-radius:6px; cursor:pointer; }
+.status { padding:0.5rem 1rem; background:#111; color:#0f0; text-align:center; }
+</style>
+</head>
+<body>
+<div class="sidebar">
+    <h2>Chats</h2>
+    <div id="chatList" class="chat-list"></div>
+    <div class="new-chat">
+        <button onclick="newChat()">+ New Chat</button>
+    </div>
+</div>
+<div class="main">
+    <div id="status" class="status">Connecting to RWRiter...</div>
+    <div id="messages" class="messages"></div>
+    <div class="input-box">
+        <textarea id="prompt" placeholder="Type your message..."></textarea>
+        <button onclick="sendMessage()">Send</button>
+    </div>
+</div>
+
+<script>
+const API_BASE = 'proxy.php?path=';
+let chats = {};
+let currentChat = null;
+let username = <?php echo json_encode($username); ?>;
+
+async function checkBackend() {
+    try {
+        let res = await fetch(`${API_BASE}healthz`);
+        let data = await res.json();
+        document.getElementById("status").textContent = data.ok ? "RWRiter UP" : "RWRiter DOWN";
+    } catch(e) {
+        document.getElementById("status").textContent = "RWRiter DOWN";
+    }
+}
+
+async function loadChatsFromServer() {
+    try {
+        let res = await fetch(`${API_BASE}chats/${username}`);
+        let data = await res.json();
+        data.chats.forEach(c => chats[c] = []);
+        if(data.chats.length) {
+            currentChat = data.chats[data.chats.length-1];
+            await loadChatHistory(currentChat);
+        } else {
+            await newChat();
+        }
+        renderChatList();
+    } catch(e) { console.error("Failed to load chats", e); }
+}
+
+function renderChatList() {
+    const list = document.getElementById("chatList");
+    list.innerHTML = "";
+    Object.keys(chats).forEach(c => {
+        let btn = document.createElement("button");
+        btn.textContent = c;
+        btn.className = (c === currentChat) ? "active" : "";
+        btn.onclick = () => switchChat(c);
+        list.appendChild(btn);
+    });
+}
+
+function switchChat(chatname) {
+    currentChat = chatname;
+    renderMessages();
+    renderChatList();
+}
+
+async function newChat() {
+    try {
+        let res = await fetch(`${API_BASE}chats/${username}/new`, {method:"POST"});
+        let data = await res.json();
+        chats[data.chat_id] = [];
+        currentChat = data.chat_id;
+        renderChatList();
+        renderMessages();
+    } catch(e) { console.error("Failed to create chat", e); }
+}
+
+async function loadChatHistory(chatname) {
+    try {
+        let res = await fetch(`${API_BASE}session/${username}/${chatname}`);
+        let data = await res.json();
+        chats[chatname] = data.history || [];
+        renderMessages();
+    } catch(e) { console.error("Failed to load chat history", e); }
+}
+
+function renderMessages() {
+    const box = document.getElementById("messages");
+    box.innerHTML = "";
+    if(!currentChat || !chats[currentChat]) return;
+    chats[currentChat].forEach(msg => {
+        let div = document.createElement("div");
+        div.className = "message " + (msg.role==="user"?"user":"bot");
+        div.textContent = (msg.role==="user"?`[${username}] `:"[RWRiter] ") + msg.content;
+        box.appendChild(div);
+    });
+    box.scrollTop = box.scrollHeight;
+}
+
+async function sendMessage() {
+    let prompt = document.getElementById("prompt").value.trim();
+    if (!prompt || !currentChat) return;
+    document.getElementById("prompt").value = "";
+
+    chats[currentChat].push({role: "user", content: prompt});
+    renderMessages();
+
+    try {
+        let res = await fetch(`${API_BASE}chat/${username}/${currentChat}`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ prompt, stream: true }) // trigger streaming
+        });
+
+        const reader = res.body.getReader();
+        let decoder = new TextDecoder();
+        let botMsg = "";
+        let div = document.createElement("div");
+        div.className = "message bot";
+        div.textContent = "[RWRiter] ";
+        document.getElementById("messages").appendChild(div);
+
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            botMsg += decoder.decode(value, {stream: true});
+            div.textContent = "[RWRiter] " + botMsg;
+            div.scrollIntoView({behavior: "smooth"});
+        }
+
+        chats[currentChat].push({role: "bot", text: botMsg});
+
+    } catch (e) {
+        chats[currentChat].push({role: "bot", text: "⚠ Error contacting RWRiter"});
+        renderMessages();
+    }
+}
+
+// Init
+checkBackend();
+loadChatsFromServer();
+</script>
+</body>
+</html>
