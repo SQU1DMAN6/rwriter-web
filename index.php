@@ -140,11 +140,11 @@ async function sendMessage() {
         let res = await fetch(`${API_BASE}chat/${username}/${currentChat}`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ prompt, stream: true }) // trigger streaming
+            body: JSON.stringify({ prompt, stream: true })
         });
 
         const reader = res.body.getReader();
-        let decoder = new TextDecoder();
+        const decoder = new TextDecoder();
         let botMsg = "";
         let div = document.createElement("div");
         div.className = "message bot";
@@ -159,10 +159,11 @@ async function sendMessage() {
             div.scrollIntoView({behavior: "smooth"});
         }
 
-        chats[currentChat].push({role: "bot", text: botMsg});
+        // Save final text in local state
+        chats[currentChat].push({role: "bot", content: botMsg});
 
     } catch (e) {
-        chats[currentChat].push({role: "bot", text: "⚠ Error contacting RWRiter"});
+        chats[currentChat].push({role: "bot", content: "⚠ Error contacting RWRiter"});
         renderMessages();
     }
 }

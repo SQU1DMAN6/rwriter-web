@@ -2,9 +2,8 @@ import os
 import json
 import time
 import requests
-from pathlib import Path
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 USERDATA_DIR = "/rwriter/userdata"
@@ -13,13 +12,13 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # F*K Security
+    allow_origins=["quanthai.net"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- Sanity check ---
+# --- Health check ---
 @app.get("/healthz")
 async def healthz():
     return {"ok": True}
@@ -33,7 +32,6 @@ async def list_chats(username: str):
     chats.sort()
     return {"chats": chats}
 
-
 # --- Create new chat ---
 @app.post("/chats/{username}/new")
 async def new_chat(username: str):
@@ -46,8 +44,7 @@ async def new_chat(username: str):
         json.dump([], f, ensure_ascii=False, indent=2)
     return {"chat_id": chat_id}
 
-
-# --- Load chat history / session ---
+# --- Load chat history ---
 @app.get("/session/{username}/{chatname}")
 async def get_session(username: str, chatname: str):
     chat_file = os.path.join(USERDATA_DIR, username, chatname, "data.json")
@@ -57,77 +54,68 @@ async def get_session(username: str, chatname: str):
         history = json.load(f)
     return {"history": history}
 
-
-# --- Send message to AI (with optional streaming) ---
+# --- Streaming chat endpoint ---
 @app.post("/chat/{username}/{chatname}")
 async def chat(username: str, chatname: str, request: Request):
     data = await request.json()
     prompt = data.get("prompt", "").strip()
-    stream = data.get("stream", False)
-
     if not prompt:
-        return JSONResponse({"error": "No prompt provided"}, status_code=400)
+        return {"error": "No prompt provided"}
 
     chat_file = os.path.join(USERDATA_DIR, username, chatname, "data.json")
     os.makedirs(os.path.dirname(chat_file), exist_ok=True)
-    history = []
 
+    # Load history
+    history = []
     if os.path.exists(chat_file):
         with open(chat_file, "r", encoding="utf-8") as f:
             history = json.load(f)
 
     # Append user message
     history.append({"role": "user", "content": prompt})
-
-    # Prepare context text
     context_text = "\n".join([f"[{m['role'].upper()}] {m['content']}" for m in history])
 
-    if not stream:
-        # Normal full-response mode
+    # --- Streaming generator ---
+    def event_stream():
+        buffer = ""
         try:
-            ai_res = requests.post(
+            with requests.post(
+                "http://127.0.0.1:11434/api/generate",
+                json={"model": "SQU1DMAN/RWRiter:latest", "prompt": context_text, "stream": True},
+                stream=True,
+                timeout=300
+            ) as ai_res:
+                ai_res.raise_for_status()
+                for chunk in ai_res.iter_content(chunk_size=64):
+                    if chunk:
+                        buffer += chunk.decode('utf-8')
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            try:
+                                data = json.loads(line)
+                                if "response" in data and data["response"]:
+                                    yield data["response"]
+                            except:
+                                continue
+        except Exception as e:
+            yield f"⚠ Error: {e}"
+
+        # Save full final response to history
+        try:
+            final_res = requests.post(
                 "http://127.0.0.1:11434/api/generate",
                 json={"model": "SQU1DMAN/RWRiter:latest", "prompt": context_text, "stream": False},
                 timeout=300
             )
-            ai_res.raise_for_status()
-            ai_text = ai_res.json().get("response", "").strip()
-        except Exception as e:
-            ai_text = f"No response from RWRiter: {str(e)}"
+            final_text = final_res.json().get("response", "")
+        except:
+            final_text = "⚠ Could not save final response"
 
-        # Append bot response and save
-        history.append({"role": "bot", "content": ai_text})
+        history.append({"role": "bot", "content": final_text})
         with open(chat_file, "w", encoding="utf-8") as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
 
-        return {"response": ai_text}
-
-    else:
-        # Streaming mode
-        def event_stream():
-            try:
-                # Simulate streaming response from AI
-                ai_res = requests.post(
-                    "http://127.0.0.1:11434/api/generate",
-                    json={"model": "SQU1DMAN/RWRiter:latest", "prompt": context_text, "stream": False},
-                    timeout=300
-                )
-                ai_res.raise_for_status()
-                full_text = ai_res.json().get("response", "")
-                # Stream word by word
-                for word in full_text.split():
-                    yield word + " "
-                    time.sleep(0.05)
-            except Exception as e:
-                yield f"⚠ Error: {e}"
-
-            # After full stream, save
-            history.append({"role": "bot", "content": full_text})
-            with open(chat_file, "w", encoding="utf-8") as f:
-                json.dump(history, f, ensure_ascii=False, indent=2)
-
-        return StreamingResponse(event_stream(), media_type="text/plain")
-
+    return StreamingResponse(event_stream(), media_type="text/plain")
 
 if __name__ == "__main__":
     import uvicorn
