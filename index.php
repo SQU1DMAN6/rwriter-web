@@ -1,13 +1,7 @@
 <?php
-session_start();
-include "/guard.php";
+include "guard.php";
 
 $username = $_SESSION["name"];
-if (!isset($username)) {
-    header("location: /");
-}
-
-include "/connect.php";
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -16,11 +10,34 @@ include "/connect.php";
     <meta charset="UTF-8">
     <title>RWRiter Chat</title>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: monospace;
+            font-family: 'Courier New', Courier, monospace;
             margin: 0;
             display: flex;
             height: 100vh;
+            background-color: #1a1a1a;
+            color: #00FF00;
+        }
+
+        button {
+            font-family: monospace;
+            padding: 0 0.75rem;
+            margin: 5px;
+            color: white;
+            background-color: #333;
+            border: 1px solid #000;
+            border-radius: 6px;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #444;
         }
 
         .sidebar {
@@ -36,7 +53,8 @@ include "/connect.php";
             margin: 0;
             padding: 1rem;
             text-align: center;
-            background: #111;
+            background: #222;
+            color: #00FF00;
         }
 
         .chat-list {
@@ -77,12 +95,12 @@ include "/connect.php";
             flex: 1;
             padding: 1rem;
             overflow-y: auto;
-            background: #f3f3f3;
+            background: #222;
         }
 
         .message {
             margin-bottom: 1rem;
-            max-width: 70%;
+            max-width: 97%;
             padding: 0.75rem 1rem;
             border-radius: 8px;
             white-space: pre-wrap;
@@ -90,39 +108,42 @@ include "/connect.php";
 
         .user {
             background: #e0e0e0;
+            color: #333;
             align-self: flex-end;
         }
 
         .bot {
-            background: #fff;
-            border: 1px solid #ccc;
+            background: #444;
+            color: #fff;
+            border: 1px solid #00FF00;
             align-self: flex-start;
         }
 
         .input-box {
             display: flex;
             padding: 1rem;
-            background: #fff;
-            border-top: 1px solid #ccc;
+            background: #333;
+            border-top: 1px solid #444;
         }
 
         .input-box textarea {
             flex: 1;
             padding: 0.75rem;
             border-radius: 6px;
-            border: 1px solid #ccc;
+            border: 1px solid #444;
             resize: none;
             height: 50px;
+            background-color: #222;
+            color: #00FF00;
         }
 
         .input-box button {
-            margin-left: 0.5rem;
-            padding: 0 1.25rem;
             border: none;
-            background: #333;
-            color: #fff;
             border-radius: 6px;
             cursor: pointer;
+            background-color: #00FF00;
+            color: black;
+            padding: 0.75rem;
         }
 
         .status {
@@ -137,9 +158,12 @@ include "/connect.php";
 <body>
     <div class="sidebar">
         <h2><?php echo "Hello, " . $username; ?></h2>
-        <br><br>
+        <br>
         <h2>Chats</h2>
         <div id="chatList" class="chat-list"></div>
+        <br>
+        <a href="logout.php"><button>Logout</button></a>
+        <br>
         <div class="new-chat">
             <button onclick="newChat()">+ New Chat</button>
         </div>
@@ -229,7 +253,6 @@ include "/connect.php";
                 list.appendChild(container);
             });
         }
-
 
         function switchChat(chatname) {
             currentChat = chatname;
@@ -336,7 +359,7 @@ include "/connect.php";
                 chats[currentChat].push({ role: "bot", content: botMsg });
 
             } catch (e) {
-                chats[currentChat].push({ role: "bot", content: "⚠ Error contacting RWRiter" });
+                chats[currentChat].push({ role: "bot", content: "Error contacting RWRiter" });
                 renderMessages();
             }
         }
