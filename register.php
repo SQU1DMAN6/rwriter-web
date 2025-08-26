@@ -38,7 +38,7 @@ if (empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === "off") {
         </form>
         <br><br>
 
-        <p>If you already have an account, <a href="/login.php"><button>Login</button></a></p><br><br>
+        <p>If you already have an account, <a href="login.php"><button>Login</button></a></p><br><br>
 
         <?php
         echo "<br><br>";
