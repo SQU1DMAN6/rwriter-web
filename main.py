@@ -6,13 +6,15 @@ from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-USERDATA_DIR = "/rwriter/userdata"
+USERDATA_DIR = os.path.expanduser("~/RWRiter-userdata/")
+OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 
 app = FastAPI()
 
+# CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["quanthai.net"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,6 +46,20 @@ async def new_chat(username: str):
         json.dump([], f, ensure_ascii=False, indent=2)
     return {"chat_id": chat_id}
 
+# --- Delete chat ---
+@app.delete("/chats/{username}/{chatname}")
+async def delete_chat(username: str, chatname: str):
+    chat_dir = os.path.join(USERDATA_DIR, username, chatname)
+    if not os.path.exists(chat_dir):
+        return {"ok": False, "error": "Chat not found"}
+    for root, dirs, files in os.walk(chat_dir, topdown=False):
+        for name in files:
+            os.remove(os.path.join(root, name))
+        for name in dirs:
+            os.rmdir(os.path.join(root, name))
+    os.rmdir(chat_dir)
+    return {"ok": True}
+
 # --- Load chat history ---
 @app.get("/session/{username}/{chatname}")
 async def get_session(username: str, chatname: str):
@@ -53,6 +69,11 @@ async def get_session(username: str, chatname: str):
     with open(chat_file, "r", encoding="utf-8") as f:
         history = json.load(f)
     return {"history": history}
+
+# --- Simple search tool ---
+def run_search(query: str):
+    # Placeholder for demo
+    return f"Search results for '{query}' (replace with real search API results)"
 
 # --- Streaming chat endpoint ---
 @app.post("/chat/{username}/{chatname}")
@@ -75,15 +96,15 @@ async def chat(username: str, chatname: str, request: Request):
     history.append({"role": "user", "content": prompt})
     context_text = "\n".join([f"[{m['role'].upper()}] {m['content']}" for m in history])
 
-    # --- Streaming generator ---
     def event_stream():
         buffer = ""
+        final_response = ""
         try:
             with requests.post(
-                "http://127.0.0.1:11434/api/generate",
-                json={"model": "SQU1DMAN/RWRiter:latest", "prompt": context_text, "stream": True},
+                OLLAMA_URL,
+                json={"model": "RWRiter:latest", "prompt": context_text, "stream": True},
                 stream=True,
-                timeout=300
+                timeout=600
             ) as ai_res:
                 ai_res.raise_for_status()
                 for chunk in ai_res.iter_content(chunk_size=64):
@@ -92,30 +113,49 @@ async def chat(username: str, chatname: str, request: Request):
                         while "\n" in buffer:
                             line, buffer = buffer.split("\n", 1)
                             try:
-                                data = json.loads(line)
-                                if "response" in data and data["response"]:
-                                    yield data["response"]
+                                data_chunk = json.loads(line)
+                                # Tool handling
+                                if "action" in data_chunk:
+                                    if data_chunk["action"] == "search":
+                                        query = data_chunk.get("input", "")
+                                        search_result = run_search(query)
+                                        context_with_result = context_text + f"\n[SEARCH RESULTS]: {search_result}"
+                                        # Re-query non-streaming
+                                        followup = requests.post(
+                                            OLLAMA_URL,
+                                            json={"model": "RWRiter:latest", "prompt": context_with_result, "stream": True},
+                                            stream=True,
+                                            timeout=300
+                                        )
+                                        for fchunk in followup.iter_content(chunk_size=64):
+                                            if fchunk:
+                                                fbuf = fchunk.decode('utf-8')
+                                                for fl in fbuf.split("\n"):
+                                                    try:
+                                                        fdata = json.loads(fl)
+                                                        if "response" in fdata and fdata["response"]:
+                                                            final_response += fdata["response"]
+                                                            yield fdata["response"]
+                                                    except:
+                                                        continue
+                                    elif data_chunk["action"] == "final" and "input" in data_chunk:
+                                        final_response += data_chunk["input"]
+                                        yield data_chunk["input"]
+                                elif "response" in data_chunk and data_chunk["response"]:
+                                    final_response += data_chunk["response"]
+                                    yield data_chunk["response"]
                             except:
                                 continue
         except Exception as e:
             yield f"⚠ Error: {e}"
 
-        # Save full final response to history
-        try:
-            final_res = requests.post(
-                "http://127.0.0.1:11434/api/generate",
-                json={"model": "SQU1DMAN/RWRiter:latest", "prompt": context_text, "stream": False},
-                timeout=300
-            )
-            final_text = final_res.json().get("response", "")
-        except:
-            final_text = "⚠ Could not save final response"
-
-        history.append({"role": "bot", "content": final_text})
+        # Save final response
+        history.append({"role": "bot", "content": final_response})
         with open(chat_file, "w", encoding="utf-8") as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
 
     return StreamingResponse(event_stream(), media_type="text/plain")
+
 
 if __name__ == "__main__":
     import uvicorn

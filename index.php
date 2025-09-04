@@ -188,8 +188,10 @@ $username = $_SESSION["name"];
                 let res = await fetch(`${API_BASE}healthz`);
                 let data = await res.json();
                 document.getElementById("status").textContent = data.ok ? "RWRiter UP" : "RWRiter DOWN";
+                document.getElementById("status").style.color = data.ok ? "#00FF00" : "red";
             } catch (e) {
                 document.getElementById("status").textContent = "RWRiter DOWN";
+                document.getElementById("status").style.color = "red";
             }
         }
 

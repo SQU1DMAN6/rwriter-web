@@ -1,7 +1,9 @@
 <?php
 session_start();
-if (empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === "off") {
-    header("Location: https://" . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI']);
+if (empty($_SERVER["HTTPS"]) || $_SERVER["HTTPS"] === "off") {
+    header(
+        "Location: https://" . $_SERVER["HTTP_HOST"] . $_SERVER["REQUEST_URI"],
+    );
     exit();
 }
 if (isset($_SESSION["login"]) && isset($_SESSION["name"])) {
@@ -20,6 +22,7 @@ if (isset($_SESSION["login"]) && isset($_SESSION["name"])) {
 
 <body>
     <main>
+        <div class="title"><h1>RWRiter Login</h1></div>
         <form method="POST" name="login" action="login.php">
             <label for="email">Email:</label>
             <input type="email" name="email" id="email" required placeholder="Email" autocomplete="off"><br><br>
@@ -34,16 +37,16 @@ if (isset($_SESSION["login"]) && isset($_SESSION["name"])) {
         include "connect.php";
 
         if (isset($_POST["email"]) && isset($_POST["password"])) {
-                $email = trim($_POST["email"]);
-                $password = $_POST["password"];
+            $email = trim($_POST["email"]);
+            $password = $_POST["password"];
 
-                $query = "SELECT * FROM fileshare.users WHERE email = $1";
-                $result = pg_query_params($db_handle, $query, array($email));
+            $query = "SELECT * FROM fileshare.users WHERE email = $1";
+            $result = pg_query_params($db_handle, $query, [$email]);
 
-                if (!$result) {
-                    echo "Query failed: " . pg_last_error($db_handle);
-                    exit;
-                }
+            if (!$result) {
+                echo "Query failed: " . pg_last_error($db_handle);
+                exit();
+            }
 
             if (pg_num_rows($result) > 0) {
                 $row = pg_fetch_assoc($result);
